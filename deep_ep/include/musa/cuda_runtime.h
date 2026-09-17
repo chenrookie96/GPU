@@ -1,0 +1,65 @@
+#pragma once
+#include<musa_runtime.h>
+#include<cuda.h>
+/* MUSA runtime compatibility */
+#define cudaError_t musaError_t
+#define cudaSuccess musaSuccess
+#define cudaGetErrorName musaGetErrorName
+#define cudaGetErrorString musaGetErrorString
+#define cudaGetLastError musaGetLastError
+#define cudaPeekAtLastError musaPeekAtLastError
+#define cudaGetDeviceCount musaGetDeviceCount
+#define cudaGetDevice musaGetDevice
+#define cudaGetDeviceProperties musaGetDeviceProperties
+#define cudaDeviceGetAttribute musaDeviceGetAttribute
+#define cudaDevAttrClockRate musaDevAttrClockRate
+#define cudaDeviceSynchronize musaDeviceSynchronize
+#define cudaMalloc musaMalloc
+#define cudaFree musaFree
+#define cudaMemset musaMemset
+#define cudaMemcpy musaMemcpy
+#define cudaMemcpyAsync musaMemcpyAsync
+#define cudaMemcpyDeviceToDevice musaMemcpyDeviceToDevice
+#define cudaMemsetAsync musaMemsetAsync
+#define cudaMallocHost musaMallocHost
+#define cudaFreeHost musaFreeHost
+#define cudaHostAlloc musaHostAlloc
+#define cudaHostAllocMapped musaHostAllocMapped
+#define cudaHostGetDevicePointer musaHostGetDevicePointer
+#define cudaMemcpyHostToDevice musaMemcpyHostToDevice
+#define cudaStream_t musaStream_t
+#define cudaDeviceProp musaDeviceProp
+#define cudaDataType_t musaDataType_t
+#define CUDA_R_16BF MUSA_R_16BF
+#define cudaIpcMemHandle_t musaIpcMemHandle_t
+#define cudaIpcGetMemHandle musaIpcGetMemHandle
+#define cudaIpcOpenMemHandle musaIpcOpenMemHandle
+#define cudaIpcCloseMemHandle musaIpcCloseMemHandle
+#define cudaIpcMemLazyEnablePeerAccess MU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS
+#define cudaLibrary_t musaLibrary_t
+#define cudaKernel_t musaKernel_t
+#define cudaLaunchConfig_t musaLaunchConfig_t
+#define cudaLaunchAttribute musaLaunchAttribute
+#define cudaLibraryLoadFromFile musaLibraryLoadFromFile
+#define cudaLibraryGetKernel musaLibraryGetKernel
+#define cudaLibraryUnload musaLibraryUnload
+#define cudaLaunchKernelExC musaLaunchKernelExC
+#define cudaLaunchKernelEx musaLaunchKernelEx
+#define cudaFuncSetAttribute musaFuncSetAttribute
+#define cudaFuncAttributeMaxDynamicSharedMemorySize musaFuncAttributeMaxDynamicSharedMemorySize
+#define cudaLaunchAttributeCooperative musaLaunchAttributeCooperative
+#define cudaLaunchAttributeClusterDimension musaLaunchAttributeClusterDimension
+#define cudaLaunchAttributeProgrammaticStreamSerialization \
+    musaLaunchAttributeProgrammaticStreamSerialization
+#define cudaErrorCudartUnloading musaErrorMusartUnloading
+#define cudaMemcpyAttributes musaMemcpyAttributes
+#define cudaMemcpyBatchAsync musaMemcpyBatchAsync
+#define cudaMemcpySrcAccessOrderStream musaMemcpySrcAccessOrderStream
+#define cudaMemcpyFlagPreferOverlapWithCompute musaMemcpyFlagPreferOverlapWithCompute
+#define cudaDeviceCanAccessPeer musaDeviceCanAccessPeer
+
+#define CUDA_ERROR_NOT_SUPPORTED MUSA_ERROR_NOT_SUPPORTED
+#define CUDA_ERROR_NOT_PERMITTED MUSA_ERROR_NOT_PERMITTED
+
+static __device__ __forceinline__ void cudaTriggerProgrammaticLaunchCompletion ( void ) {}
+static __device__ __forceinline__ void cudaGridDependencySynchronize ( void ) {}

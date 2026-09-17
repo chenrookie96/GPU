@@ -1,0 +1,76 @@
+#pragma once
+#include<musa.h>
+
+/* MUSA driver compatibility */
+#define CUresult MUresult
+#define CUDA_SUCCESS MUSA_SUCCESS
+#define CUDA_ERROR_DEINITIALIZED MUSA_ERROR_DEINITIALIZED
+#define CUDAAPI MUSAAPI
+
+#define CUdevice MUdevice
+#define CUcontext MUcontext
+#define CUmodule MUmodule
+#define CUfunction MUfunction
+#define CUstream MUstream
+#define CUdeviceptr MUdeviceptr
+#define CUdevice_attribute MUdevice_attribute
+#define CUmemFabricHandle MUmemFabricHandle
+#define CUmemGenericAllocationHandle MUmemGenericAllocationHandle
+#define CUmemAllocationProp MUmemAllocationProp
+#define CUmemAllocationHandleType MUmemAllocationHandleType
+#define CUmemAllocationGranularity_flags MUmemAllocationGranularity_flags
+#define CUmemAccessDesc MUmemAccessDesc
+#define CUmemLocation MUmemLocation
+#define CUstreamBatchMemOpParams MUstreamBatchMemOpParams
+#define CUstreamBatchMemOpType MUstreamBatchMemOpType
+#define CUstreamWaitValue_flags MUstreamWaitValue_flags
+#define CUlaunchConfig MUlaunchConfig
+#define CUlaunchAttribute MUlaunchAttribute
+#define cuuint64_t muuint64_t
+#define CUmemLocationType MUmemLocationType
+
+#define CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES \
+    MU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES
+#define CU_LAUNCH_ATTRIBUTE_COOPERATIVE MU_LAUNCH_ATTRIBUTE_COOPERATIVE
+#define CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION MU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION
+#define CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION \
+    MU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION
+#define CU_STREAM_WAIT_VALUE_EQ MU_STREAM_WAIT_VALUE_EQ
+#define CU_STREAM_WAIT_VALUE_GEQ MU_STREAM_WAIT_VALUE_GEQ
+#define CU_STREAM_MEM_OP_WAIT_VALUE_32 MU_STREAM_MEM_OP_WAIT_VALUE_32
+#define CU_STREAM_MEM_OP_WRITE_VALUE_32 MU_STREAM_MEM_OP_WRITE_VALUE_32
+#define CU_MEM_ALLOCATION_TYPE_PINNED MU_MEM_ALLOCATION_TYPE_PINNED
+#define CU_MEM_LOCATION_TYPE_DEVICE MU_MEM_LOCATION_TYPE_DEVICE
+#define CU_MEM_HANDLE_TYPE_FABRIC MU_MEM_HANDLE_TYPE_FABRIC
+#define CU_MEM_ACCESS_FLAGS_PROT_READWRITE MU_MEM_ACCESS_FLAGS_PROT_READWRITE
+#define CU_MEM_ALLOC_GRANULARITY_MINIMUM MU_MEM_ALLOC_GRANULARITY_MINIMUM
+#define CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS MU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS
+#define CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID MU_DEVICE_ATTRIBUTE_HOST_NUMA_ID
+#define CU_MEM_LOCATION_TYPE_HOST_NUMA MU_MEM_LOCATION_TYPE_HOST_NUMA
+#define CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR MU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR
+#define CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_SUPPORTED MU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_SUPPORTED
+#define CU_MEM_ALLOC_GRANULARITY_RECOMMENDED MU_MEM_ALLOC_GRANULARITY_RECOMMENDED
+
+#define cuDeviceGetAttribute muDeviceGetAttribute
+#define cuDeviceGet muDeviceGet
+#define cuGetErrorName muGetErrorName
+#define cuGetErrorString muGetErrorString
+#define cuFuncSetAttribute muFuncSetAttribute
+#define cuModuleLoad muModuleLoad
+#define cuModuleUnload muModuleUnload
+#define cuModuleGetFunction muModuleGetFunction
+#define cuLaunchKernelEx muLaunchKernelEx
+#define cuMemSetAccess muMemSetAccess
+#define cuMemRetainAllocationHandle muMemRetainAllocationHandle
+#define cuMemGetAddressRange_v2 muMemGetAddressRange_v2
+#define cuMemAddressReserve muMemAddressReserve
+#define cuMemAddressFree muMemAddressFree
+#define cuMemMap muMemMap
+#define cuMemUnmap muMemUnmap
+#define cuMemCreate muMemCreate
+#define cuMemRelease muMemRelease
+#define cuCtxGetDevice muCtxGetDevice
+#define cuMemImportFromShareableHandle muMemImportFromShareableHandle
+#define cuMemExportToShareableHandle muMemExportToShareableHandle
+#define cuMemGetAllocationGranularity muMemGetAllocationGranularity
+#define cuStreamBatchMemOp muStreamBatchMemOp

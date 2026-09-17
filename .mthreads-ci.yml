@@ -1,0 +1,373 @@
+include:
+  - project: "mthreads-ci-templates"
+    ref: "master"
+    files:
+      - ".base.yml"
+
+stages:
+  - claude-review
+  - build
+  - test
+
+Claude_Review:
+  stage: claude-review
+  rules:
+    - if: '${gitlabActionType} == "MERGE"'
+  extends: ".k8s-base"
+  needsSourceCode:
+    shallow: true
+    submoduleShallow: true
+  variables:
+    K8S_IMAGE: "sh-harbor.mthreads.com/build-env/vps-qemu:v22.2_rc"
+    K8S_CLUSTER: "shfarm"
+    K8S_MEMORY_REQUEST: "5Gi"
+    K8S_CPU_REQUEST: "1"
+    K8S_STORAGE_REQUEST: "1Gi"
+    K8S_MEMORY_LIMIT: "5Gi"
+    K8S_CPU_LIMIT: "1"
+    K8S_STORAGE_LIMIT: "1Gi"
+  script:
+    - |
+      export CI_PROJECT_ID="sw%2FDeepEP"
+      export CI_MERGE_REQUEST_IID=${gitlabMergeRequestIid}
+      export CI_SERVER_URL="https://sh-code.mthreads.com"
+
+    # 👇 验证 claude 是否已安装
+    - which claude || true
+    - claude --version || true
+    - echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:+set}"
+    - echo "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}"
+
+    # 👇 设置 GitLab API 所需变量（全部由 GitLab CI 自动提供）
+    - echo "CI_MERGE_REQUEST_IID=${CI_MERGE_REQUEST_IID}"
+    - echo "CI_PROJECT_ID=${CI_PROJECT_ID}"
+    - echo "CI_SERVER_URL=${CI_SERVER_URL}"
+
+    # 👇 使用 GITLAB_TOKEN 环境变量
+    - echo "GITLAB_TOKEN=${GITLAB_TOKEN:+set}"
+
+    # 👇 获取 MR 代码变更差异
+    - |
+      echo "=== Fetching MR #${CI_MERGE_REQUEST_IID} changes ==="
+      git diff origin/${gitlabTargetBranch}...HEAD > mr-changes.diff 2>/dev/null || \
+      git diff HEAD~1..HEAD > mr-changes.diff 2>/dev/null || \
+      git status > mr-changes.diff
+
+    # 👇 执行代码审查，输出保存到文件
+    - |
+      claude \
+        -p "Please review the code changes in this merge request for:
+            1. Code style and consistency
+            2. Potential bugs or issues
+            3. Security concerns
+            4. Suggestions for improvement
+            5. Best practices compliance
+
+            The code changes are provided below. Provide a detailed review report in Chinese.
+
+            <code_changes>
+            $(cat mr-changes.diff)
+            </code_changes>" \
+        --permission-mode default \
+        --debug \
+        > review_report.md 2>&1 || true
+
+    # 👇 显示审查报告（CI 日志）
+    - echo "=== Claude Code Review Report ==="
+    - cat review_report.md
+
+    # 👇 使用 GitLab API 发布评论到 MR
+    - |
+      # 转换变量名，避免在pipeline日志中打印明文
+      GITLAB_TOKEN_HIDDEN=$(printenv GITLAB_TOKEN)
+      if [ -n "${GITLAB_TOKEN_HIDDEN}" ] && [ -n "${CI_MERGE_REQUEST_IID}" ]; then
+        echo ""
+        echo "=== Posting review to GitLab MR #${CI_MERGE_REQUEST_IID} ==="
+        # 先测试 token 是否有效
+        curl --silent --header "PRIVATE-TOKEN: ${GITLAB_TOKEN_HIDDEN}" \
+          "${CI_SERVER_URL}/api/v4/user" > /tmp/user.json || true
+        echo "Token test response: $(cat /tmp/user.json | head -c 200)"
+
+        # 使用 curl 表单方式发送，避免 JSON 转义问题
+        RESPONSE=$(curl --silent --write-out "\n%{http_code}" \
+          --request POST \
+          --header "PRIVATE-TOKEN: ${GITLAB_TOKEN_HIDDEN}" \
+          "${CI_SERVER_URL}/api/v4/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes" \
+          --form "body=<review_report.md")
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | head -n -1)
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+          echo "✓ Comment posted successfully!"
+        else
+          echo "✗ Failed to post comment (HTTP $HTTP_CODE)"
+          echo "Response: $BODY"
+        fi
+      else
+        echo "⚠ Skipping comment post: missing GITLAB_TOKEN or CI_MERGE_REQUEST_IID"
+      fi
+
+# Build job - install MUSA then build DeepEP
+.build-base:
+  stage: build
+  extends: ".k8s-base"
+  needsSourceCode: true
+  variables:
+    K8S_IMAGE: "sh-harbor.mthreads.com/qa/ubuntu-22-04-deepep-test-images-openmpi506:v0"
+    K8S_CLUSTER: "shfarm"
+    K8S_MEMORY_REQUEST: "5Gi"
+    K8S_CPU_REQUEST: "2"
+    K8S_MEMORY_LIMIT: "5Gi"
+    K8S_CPU_LIMIT: "2"
+  dependencies:
+    - oss_path: "sw-daily/musa/master/2026-07-16/musa_toolkits_install_full.tar.gz"
+      alias: "downloads"
+    - oss_path: "sw-daily/musa/master/2026-07-16/mccl.PH1.tar.gz"
+      alias: "downloads"
+    - oss_path: "sw-daily/musa/master/2026-07-16/mudnn.PH1.tar.gz"
+      alias: "downloads"
+    - oss_path: "sw-daily/musa/master/2026-06-30/others/mtshmem.PH1.tar.gz"
+      alias: "downloads"
+    - oss_path: "sw-daily/musa/master/2026-06-30/others/torch_musa_290_PH1_py310.tar.gz"
+      alias: "downloads"
+  script:
+    # Setup MUSA environment
+    - |
+      cd ${WORKSPACE}/downloads/ && tar -zxf musa_toolkits*.tar.gz
+      cd ${WORKSPACE}/downloads/ && tar -zxf mccl*.tar.gz
+      cd ${WORKSPACE}/downloads/ && tar -zxf mudnn*.tar.gz
+      cd ${WORKSPACE}/downloads/ && tar -zxf mtshmem*.tar.gz
+      cd ${WORKSPACE}/downloads/ && tar -zxf torch_musa*.tar.gz
+      cd ${WORKSPACE}/downloads/musa_toolkits_install/ && ./install.sh
+      cd ${WORKSPACE}/downloads/mccl/ && ./install.sh
+      cd ${WORKSPACE}/downloads/mudnn/ && ./install_mudnn.sh
+      cd ${WORKSPACE}/downloads/mtshmem/ && ./install.sh
+      cd ${WORKSPACE}/downloads/ && pip install --force-reinstall torch*.whl --no-deps
+      export PATH=/usr/local/musa/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      export LD_LIBRARY_PATH=/usr/local/musa/lib:/usr/lib:/usr/lib/x86_64-linux-gnu
+      musa_version_query
+    # Build DeepEP
+    - |
+      cd ${WORKSPACE}/DeepEP && ./install.sh
+      cd ${WORKSPACE}/DeepEP/dist && tar czf deepep.tar.gz deep*.whl
+    
+
+build-mr:
+  rules:
+    - if: '${EVENT_TYPE} == "mr"'
+  extends: ".build-base"
+  artifacts:
+    - type: "oss"
+      paths: "${WORKSPACE}/DeepEP/dist/deepep.tar.gz"
+
+build-push:
+  rules:
+    - if: '${EVENT_TYPE} == "push"'
+  extends: ".build-base"
+  artifacts:
+    - type: "oss"
+      paths: "${WORKSPACE}/DeepEP/dist/deepep.tar.gz"
+      extra_destinations: "sw-build/DeepEP/${BRANCH}/${COMMIT_ID}"
+
+runtest_gate:
+  stage: test
+  extends: ".k8s-base"
+  variables:
+    K8S_CLUSTER: "shfarm"
+    K8S_MEMORY_REQUEST: "1Gi"
+    K8S_CPU_REQUEST: "1"
+    K8S_STORAGE_REQUEST: "1Gi"
+    K8S_MEMORY_LIMIT: "1Gi"
+    K8S_CPU_LIMIT: "1"
+    K8S_STORAGE_LIMIT: "1Gi"
+  rules:
+    - if: '${gitlabActionType} == "MERGE"'
+    - if: '${gitlabActionType} == "NOTE" && ${gitlabTriggerPhrase}.toLowerCase().contains("runtest")'
+  script:
+    - |
+      if [ "$gitlabActionType" = "MERGE" ]; then
+        echo "请在 MR 评论中输入 runtest 触发全量测试"
+        exit 1
+      fi
+      echo "runtest 已触发，门禁通过"
+
+test_node:
+  stage: test
+  timeout: "180m"
+  rules:
+    - if: '${gitlabActionType} == "NOTE" && ${gitlabTriggerPhrase}.toLowerCase().contains("runtest")'
+  extends: ".node-base"
+  needsSourceCode: true
+  variables:
+    DEEPEP_TEST_IMAGE: "sh-harbor.mthreads.com/qa/ubuntu-22-04-deepep-test-images-openmpi506:v0"
+    NODE_LABELS: "qingnian_mccl_test"
+    DEEPEP_TEST_DIR: "/data/swqa/swqa_shared_dir/DeepEp_test"
+    SSH_RUN: "ssh -p 22 -o StrictHostKeyChecking=no -o IPQoS=throughput -o UserKnownHostsFile=/dev/null "
+    SCP_RUN: "scp -P 22 -o StrictHostKeyChecking=no -o IPQoS=throughput -o UserKnownHostsFile=/dev/null "
+    SSH_USER: "root"
+    IP_NODE1: "10.20.32.31"
+    IP_NODE2: "10.20.32.32"
+    BMC_NODE1: "10.20.12.31"
+    BMC_NODE2: "10.20.12.32"
+  dependencies:
+    - from: "build-mr"
+      paths: "deepep.tar.gz"
+  script:
+    # uninstall ddk on hosts 1
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        systemctl stop lightdm ; pkill -9 Xorg ; pkill -9 python ; pkill -9 mpiexec ; \
+        docker stop $(docker ps -q) ; rmmod mt_peermem ; rmmod mtgpu_tiny ; rmmod mtgpu ; dpkg -P musa;'
+
+    # uninstall ddk on hosts 2
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE2} ' \
+        systemctl stop lightdm ; pkill -9 Xorg ; pkill -9 python ; pkill -9 mpiexec ; \
+        docker stop $(docker ps -q) ; rmmod mt_peermem ; rmmod mtgpu_tiny ; rmmod mtgpu ; dpkg -P musa;'
+    # reboot test server
+    - |
+      set -e
+      ipmitool -I lanplus -H ${BMC_NODE1} -U Administrator -P 'Superuser9!' power cycle
+      ipmitool -I lanplus -H ${BMC_NODE2} -U Administrator -P 'Superuser9!' power cycle
+
+      MAX_RETRY_SSH=20
+      retry_count=0
+      while [[ $retry_count -lt $MAX_RETRY_SSH ]]; do
+        if timeout 5 ${SSH_RUN} ${SSH_USER}@${IP_NODE1} 'echo "ssh test success"' 2>/dev/null; then
+            break
+        fi
+        retry_count=$((retry_count + 1))
+        echo "$retry_count/$MAX_RETRY_SSH retry connect ${IP_NODE1}"
+        sleep 30
+      done
+      retry_count=0
+      while [[ $retry_count -lt $MAX_RETRY_SSH ]]; do
+        if timeout 5 ${SSH_RUN} ${SSH_USER}@${IP_NODE2} 'echo "ssh test success"' 2>/dev/null; then
+            break
+        fi
+        retry_count=$((retry_count + 1))
+        echo "$retry_count/$MAX_RETRY_SSH retry connect ${IP_NODE2}"
+        sleep 30
+      done
+
+    # prepare all depandency  
+    - |
+      cd ${WORKSPACE} && tar -czf DeepEP.tar.gz DeepEP && ls -al
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        mkdir -p ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/; \
+        rm -rf ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/* \
+      :'
+      ${SCP_RUN} deepep.tar.gz ${SSH_USER}@${IP_NODE1}:${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/
+      ${SCP_RUN} DeepEP.tar.gz ${SSH_USER}@${IP_NODE1}:${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        cd ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/ && tar zxf deepep.tar.gz && tar zxf DeepEP.tar.gz && \
+        mkdir -p ${DEEPEP_TEST_DIR}/common/ && rm -rf ${DEEPEP_TEST_DIR}/common/* && cd ${DEEPEP_TEST_DIR}/common/ && \
+        mc cp sh-moss/sw-daily/musa/master/2026-07-16/musa_2026.07.16-ecd175-fbee1f323_amd64.deb ./ && \
+        mc cp sh-moss/sw-daily/musa/master/2026-07-16/musa_toolkits_install_full.tar.gz ./ && \
+        mc cp sh-moss/sw-daily/musa/master/2026-07-16/mccl.PH1.tar.gz ./ && \
+        mc cp sh-moss/sw-daily/musa/master/2026-07-16/mudnn.PH1.tar.gz ./ && \
+        mc cp sh-moss/sw-daily/musa/master/2026-06-30/others/mtshmem.PH1.tar.gz ./ && \
+        mc cp sh-moss/sw-daily/musa/master/2026-06-30/others/torch_musa_290_PH1_py310.tar.gz ./ && \
+        mc cp sh-moss/sw-release/musa/external/5.1.0/deb/mt-peermem_1.3_amd64.deb ./ && \
+        mc cp sh-moss/sw-release/musa/external/5.1.0/others/9eabcd071_mtml_2.4.1-linux-R_amd64.deb ./ && \
+        tar zxf musa_toolkits*.tar.gz && tar zxf mccl*.tar.gz && tar zxf mudnn*.tar.gz && \
+        tar zxf mtshmem*.tar.gz && tar zxf torch_musa*.tar.gz && \
+      :'
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE2} ' \
+        mkdir -p /data/swqa/swqa_shared_dir && \
+        mount ${IP_NODE1}:/data/swqa/swqa_shared_dir /data/swqa/swqa_shared_dir && \
+        ls -al ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/ && \
+      :'
+    # install ddk on hosts 1
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        systemctl stop lightdm ; pkill -9 Xorg ; pkill -9 python ; pkill -9 mpiexec ; \
+        docker stop $(docker ps -q) ; rmmod mt_peermem ; rmmod mtgpu_tiny ; rmmod mtgpu ; \
+        cd ${DEEPEP_TEST_DIR}/common/ && dpkg -i musa*.deb && dpkg -i mt-peermem*.deb && \
+        echo "options mtgpu tp_pci_ob_enable=1 tp_pci_vender_id=0x15B3" >> /etc/modprobe.d/mtgpu.conf && \
+        modprobe -rv mt_peermem && modprobe -rv mtgpu && modprobe -v mtgpu && modprobe -v mt_peermem && \
+        cat /sys/module/mtgpu/parameters/tp_pci_vender_id && \
+      :'
+    # install ddk on hosts 2
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE2} ' \
+        systemctl stop lightdm ; pkill -9 Xorg ; pkill -9 python ; pkill -9 mpiexec ; \
+        docker stop $(docker ps -q) ; rmmod mt_peermem ; rmmod mtgpu_tiny ; rmmod mtgpu ; \
+        cd ${DEEPEP_TEST_DIR}/common/ && dpkg -i musa*.deb && dpkg -i mt-peermem*.deb && \
+        echo "options mtgpu tp_pci_ob_enable=1 tp_pci_vender_id=0x15B3" >> /etc/modprobe.d/mtgpu.conf && \
+        modprobe -rv mt_peermem && modprobe -rv mtgpu && modprobe -v mtgpu && modprobe -v mt_peermem && \
+        cat /sys/module/mtgpu/parameters/tp_pci_vender_id && \
+      :'
+    # setup docker 1
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        docker pull ${DEEPEP_TEST_IMAGE} ; \
+        docker rm -f deepep_smoke_test 2>/dev/null ; \
+        docker run -d --privileged --net host --runtime runc --shm-size=32g --name deepep_smoke_test \
+          -e PATH=/usr/local/musa/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+          -e LD_LIBRARY_PATH=/usr/local/mtshmem/lib:/usr/local/musa/lib:/usr/lib/x86_64-linux-gnu:/usr/lib \
+          -v ${DEEPEP_TEST_DIR}:${DEEPEP_TEST_DIR} -v /usr/lib/x86_64-linux-gnu/:/usr/lib/x86_64-linux-gnu/ \
+          ${DEEPEP_TEST_IMAGE} sleep infinity && \
+        docker exec deepep_smoke_test bash -c " \
+          echo -e \"PermitRootLogin yes \" >> /etc/ssh/sshd_config && service ssh restart && \
+          cd ${DEEPEP_TEST_DIR}/common/ && dpkg -i *_mtml_*.deb && \
+          rm -rf /usr/local/mtshmem*; cd ${DEEPEP_TEST_DIR}/common/mtshmem/ && ./install.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/musa_toolkits_install/ && ./install.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/mccl/ && ./install.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/mudnn/ && ./install_mudnn.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/ && pip install --force-reinstall torch*.whl --no-deps && \
+          cd ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/ && pip install --force-reinstall deep_ep*.whl --no-deps && \
+          musa_version_query && \
+        :" && \
+      :'
+    # setup docker 2
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE2} ' \
+        docker pull ${DEEPEP_TEST_IMAGE} ; \
+        docker rm -f deepep_smoke_test 2>/dev/null ; \
+        docker run -d --privileged --net host --runtime runc --shm-size=32g --name deepep_smoke_test \
+          -e PATH=/usr/local/musa/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+          -e LD_LIBRARY_PATH=/usr/local/mtshmem/lib:/usr/local/musa/lib:/usr/lib/x86_64-linux-gnu:/usr/lib \
+          -v ${DEEPEP_TEST_DIR}:${DEEPEP_TEST_DIR} -v /usr/lib/x86_64-linux-gnu/:/usr/lib/x86_64-linux-gnu/ \
+          ${DEEPEP_TEST_IMAGE} sleep infinity && \
+        docker exec deepep_smoke_test bash -c " \
+          echo -e \"PermitRootLogin yes \" >> /etc/ssh/sshd_config && service ssh restart && \
+          cd ${DEEPEP_TEST_DIR}/common/ && dpkg -i *_mtml_*.deb && \
+          rm -rf /usr/local/mtshmem*; cd ${DEEPEP_TEST_DIR}/common/mtshmem/ && ./install.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/musa_toolkits_install/ && ./install.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/mccl/ && ./install.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/mudnn/ && ./install_mudnn.sh && \
+          cd ${DEEPEP_TEST_DIR}/common/ && pip install --force-reinstall torch*.whl --no-deps && \
+          cd ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/ && pip install --force-reinstall deep_ep*.whl --no-deps && \
+          musa_version_query && \
+        :" && \
+      :'
+    # wait for driver ready
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE2} ' \
+        for ((i=0; i<36; i++)); do [[ $(mthreads-gmi mtlink -s|grep UP|wc -l) -ge 112 ]] && break; sleep 5; done ; \
+        docker exec deepep_smoke_test bash -c "musaInfo" && \
+      :'
+    # run test
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        docker exec deepep_smoke_test bash -c " \
+          set -e; cd ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/DeepEP/pytest && \
+          MUSA_DEVICE_PAGE_SIZE=0x1000 MCCL_NET_SHARED_BUFFERS=0 TEST_TYPE_T=smoke \
+          python run_from_csv.py --dry-run --server-ip=${IP_NODE1} --client-ip=${IP_NODE2} && \
+          MUSA_DEVICE_PAGE_SIZE=0x1000 MCCL_NET_SHARED_BUFFERS=0 TEST_TYPE_T=smoke \
+          python run_from_csv.py --server-ip=${IP_NODE1} --client-ip=${IP_NODE2} && \
+        :" && \
+      :'
+    # run pressure test
+    - |
+      ${SSH_RUN} ${SSH_USER}@${IP_NODE1} ' \
+        docker exec deepep_smoke_test bash -c " \
+          set -e; cd ${DEEPEP_TEST_DIR}/${BUILD_NUMBER}/DeepEP/pytest && \
+          MUSA_DEVICE_PAGE_SIZE=0x1000 MCCL_NET_SHARED_BUFFERS=0 \
+          python -u run_test.py -m low_latency --server-ip=${IP_NODE1} --client-ip=${IP_NODE2} --pressure-test=40 && \
+        :" && \
+      :'
+
+  after_script:
+    - ${SSH_RUN} ${SSH_USER}@${IP_NODE1} 'docker rm -f deepep_smoke_test 2>/dev/null'
+    - ${SSH_RUN} ${SSH_USER}@${IP_NODE2} 'docker rm -f deepep_smoke_test 2>/dev/null'
